@@ -233,14 +233,29 @@ impl<SPI: Transfer<u8>, CS: OutputPin> Flash<SPI, CS> {
     }
 
     pub fn write_enable(&mut self) -> Result<(), Error<SPI, CS>> {
-        let mut cmd_buf = [Opcode::WriteEnable as u8];
-        self.command(&mut cmd_buf)?;
+        while !self.read_status()?.contains(Status::WEL) {
+            let mut cmd_buf = [Opcode::WriteEnable as u8];
+            self.command(&mut cmd_buf)?;
+        }
         Ok(())
     }
 
+    // Wait for the BUSY flag to clear
+    // This function also handles the cases where the BUSY
+    // flag is not set yet (but expected) as well as when the
+    // BUSY flag is briefly unset to be set again shortly after.
+    // The latter behavior has been observed on the very popular
+    // Winbond chip W25Q128JV when executing a chip erase operation.
     fn wait_done(&mut self) -> Result<(), Error<SPI, CS>> {
         // TODO: Consider changing this to a delay based pattern
-        while self.read_status()?.contains(Status::BUSY) {}
+        let mut busy = true;
+        const RETRIES :usize = 10;
+        while busy {
+            busy = false;
+            for _ in 0..RETRIES {
+                busy |= self.read_status()?.contains(Status::BUSY);
+            }
+        }
         Ok(())
     }
 
